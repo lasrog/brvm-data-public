@@ -2,9 +2,8 @@ name: Sync fork with upstream
 
 on:
   schedule:
-    # Toutes les 30 min, du lundi au vendredi, 9h-15h UTC (heures de trading BRVM)
-    - cron: '*/30 9-15 * * 1-5'
-  workflow_dispatch: {}   # permet de le lancer manuellement
+    - cron: '*/30 9-15 * * 1-5'   # sync toutes les 30 min, heures de trading
+  workflow_dispatch: {}
 
 jobs:
   sync:
@@ -16,6 +15,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Créer une branche de sauvegarde (1x/jour max)
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          BACKUP_BRANCH="backup/$TODAY"
+          if git ls-remote --exit-code --heads origin "$BACKUP_BRANCH" >/dev/null 2>&1; then
+            echo "Backup du jour ($BACKUP_BRANCH) déjà existante, on saute."
+          else
+            git checkout -b "$BACKUP_BRANCH"
+            git push origin "$BACKUP_BRANCH"
+            git checkout main
+          fi
 
       - name: Ajouter l'upstream et fusionner
         run: |
