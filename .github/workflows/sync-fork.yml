@@ -1,0 +1,28 @@
+name: Sync fork with upstream
+
+on:
+  schedule:
+    # Toutes les 30 min, du lundi au vendredi, 9h-15h UTC (heures de trading BRVM)
+    - cron: '*/30 9-15 * * 1-5'
+  workflow_dispatch: {}   # permet de le lancer manuellement
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout ton fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ajouter l'upstream et fusionner
+        run: |
+          git remote add upstream https://github.com/Fredysessie/brvm-data-public.git
+          git fetch upstream main
+          git checkout main
+          git merge upstream/main --ff-only
+
+      - name: Pousser les changements
+        run: git push origin main
