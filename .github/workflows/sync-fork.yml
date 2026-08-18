@@ -1,147 +1,11 @@
-
-Claude a terminé la réponse.
-Presque, mais il y a deux problèmes :
-
-1. Ordre des étapes cassé — "Créer une branche de sauvegarde" s'exécute avant "Checkout ton fork". Or c'est actions/checkout@v4 qui clone le dépôt sur le runner. Sans ça, il n'y a aucun repo Git au moment de la sauvegarde : git checkout -b échouera direct. Il faut inverser l'ordre.
-
-2. Une sauvegarde toutes les 30 min, pas par jour — le cron actuel (*/30 9-15 * * 1-5) déclenche tout le job, y compris la sauvegarde, toutes les 30 minutes pendant les heures de trading. Si tu veux vraiment "une sauvegarde par jour" comme on en avait parlé, il faut soit condition ner l'étape de backup, soit la mettre dans un job séparé avec son propre cron quotidien.
-
-Voici la version corrigée avec les deux fix :
-
-yaml
 name: Sync fork with upstream
 
-on:
-  schedule:
-    - cron: '*/30 9-15 * * 1-5'   # sync toutes les 30 min, heures de trading
-  workflow_dispatch: {}
-
-jobs:
-  sync:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout ton fork
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Créer une branche de sauvegarde (1x/jour max)
-        run: |
-          TODAY=$(date -u +%Y-%m-%d)
-          BACKUP_BRANCH="backup/$TODAY"
-          if git ls-remote --exit-code --heads origin "$BACKUP_BRANCH" >/dev/null 2>&1; then
-            echo "Backup du jour ($BACKUP_BRANCH) déjà existante, on saute."
-          else
-            git checkout -b "$BACKUP_BRANCH"
-            git push origin "$BACKUP_BRANCH"
-            git checkout main
-          fi
-
-      - name: Ajouter l'upstream et fusionner
-        run: |
-          git remote add upstream https://github.com/Fredysessie/brvm-data-public.git
-          git fetch upstream main
-          git checkout main
-          git merge upstream/main --ff-only
-
-      - name: Pousser les changements
-        run: git push origin main
-Ce que ça fait : à chaque exécution (toutes les 30 min), le job vérifie d'abord si une branche backup/AAAA-MM-JJ existe déjà pour aujourd'hui sur GitHub (git ls-remote). Si oui, il saute la sauvegarde. Si non (première run de la journée), il la crée. Résultat : une seule sauvegarde par jour, même si le sync tourne toutes les 30 min.
-
-Ça, c'est un message d'erreur générique de l'interface GitHub (pas lié à ton workflow ni à tes données) — ça arrive quand GitHub n'arrive pas à charger les métadonnées du dernier commit pour l'affichage de la liste de fichiers, souvent à cause d'un ralentissement temporaire côté GitHub.
-
-À faire dans l'ordre :
-
-Rafraîchir la page
-Simplement recharger la page (F5 ou Ctrl+R). Dans la grande majorité des cas, ce message disparaît au rechargement suivant.
-1
-2
-3
-4
-Si après ça le message persiste et que l'onglet Actions montre bien des runs en succès, ce n'est vraiment qu'un souci d'affichage côté GitHub — tes données sont saines. Dis-moi si tu veux qu'on regarde autre chose (le statut des runs, les branches de backup créées, etc.).
-
-les branches qui sont écrées comme backup ne font ils pas excécuter le fichier sync-fork.yml et on risque avoir une boucle infinie?
-
-
-A réfléchi pendant 5 s
-A réfléchi pendant 5 s
-Bonne question, mais non — pas de risque de boucle ici. Voici pourquoi :
-
-Le déclencheur du workflow est défini par le bloc on: en haut du fichier :
-
-yaml
-on:
-  schedule:
-    - cron: '*/30 9-15 * * 1-5'
-  workflow_dispatch: {}
-Il n'y a pas de on: push. Donc peu importe combien de branches tu crées ou de commits tu pousses (git push origin backup/..., git push origin main), ça ne déclenche jamais une nouvelle exécution du workflow. Seul le cron (toutes les 30 min) ou un déclenchement manuel (workflow_dispatch) lance le job.
-
-Une boucle infinie arriverait seulement si le workflow avait un trigger du type :
-
-yaml
-on:
-  push:
-    branches: ['**']   # ou même juste 'main'
-— dans ce cas-là, oui, chaque push (y compris ceux faits par le workflow lui-même) relancerait le job, qui repousserait, qui relancerait, etc. Mais ce n'est pas ta configuration actuelle, donc tu es tranquille.
-
-Si un jour tu ajoutes un trigger on: push pour une autre raison, la parade classique est soit d'exclure les commits faits par le bot (if: github.actor != 'github-actions[bot]'), soit d'utiliser [skip ci] dans le message de commit.
-
-
-Message réduit
-
-A réfléchi pendant 14 s
-A réfléchi pendant 14 s
-La cause : ton main a maintenant divergé de upstream/main. Dès que tu as ajouté le fichier .github/workflows/sync-fork.yml en committant directement sur main de ton fork, ton main a un commit que l'upstream n'a pas — et de son côté, l'upstream a continué d'avancer avec ses propres nouvelles données. Les deux branches ont donc chacune des commits que l'autre n'a pas : ce n'est plus une simple avance linéaire, donc --ff-only refuse (à raison) de fusionner.
-
-C'est en fait permanent avec --ff-only : dès qu'un fork a ne serait-ce qu'un seul commit propre (ton fichier de workflow), le fast-forward pur devient impossible pour toujours, puisque ton historique et celui de l'upstream ne seront plus jamais strictement linéaires l'un par rapport à l'autre.
-
-La solution : remplacer le fast-forward strict par un vrai merge (qui crée un commit de fusion). Comme tes seuls commits propres touchent .github/workflows/ et que l'upstream ne touche que data/, il n'y aura pas de conflit réel :
-
-yaml
-      - name: Ajouter l'upstream et fusionner
-        run: |
-          git remote add upstream https://github.com/Fredysessie/brvm-data-public.git
-          git fetch upstream main
-          git checkout main
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git merge upstream/main --no-ff -m "Sync data from upstream $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-Remplace juste ton étape "Ajouter l'upstream et fusionner" par celle-ci (--ff-only devient --no-ff + un message de commit, et j'ajoute la config git user/email nécessaire pour que le commit de merge ait un auteur valide).
-
-Si jamais un vrai conflit apparaît un jour (peu probable vu que vous ne touchez pas les mêmes fichiers), le job échouera avec un message de conflit explicite plutôt que ce message de fast-forward — tu pourras me montrer l'erreur et on ajustera.
-
-donne le fichier final
-
-
-Fichier créé, a exécuté une commande, lu un fichier · 1 note
-Fichier créé, a exécuté une commande, lu un fichier · 1 note
-Récapitulatif de ce qui a changé par rapport à ta version :
-
---ff-only → --no-ff : accepte que ton main et l'upstream aient chacun des commits propres (ton workflow d'un côté, les nouvelles données de l'autre), et crée un commit de fusion au lieu d'exiger un historique strictement linéaire.
-Ajout de l'identité git (user.name/user.email) avant le merge, nécessaire pour que le commit de fusion ait un auteur valide dans l'environnement du runner.
-Sauvegarde quotidienne conservée (une branche backup/AAAA-MM-JJ par jour max, créée avant le sync).
-Remplace le contenu de ton .github/workflows/sync-fork.yml sur GitHub par celui-ci, puis relance manuellement (Run workflow) pour vérifier que ça passe.
-
-
-Sync fork
-YML 
-
-
-
-
-
-Claude est une IA et peut faire des erreurs. Veuillez vérifier les réponses.
-Sync fork · YML
-name: Sync fork with upstream
- 
 on:
   schedule:
     # Toutes les 30 min, du lundi au vendredi, 9h-15h UTC (heures de trading BRVM)
     - cron: '*/30 9-15 * * 1-5'
   workflow_dispatch: {}   # permet de le lancer manuellement
- 
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -152,12 +16,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
- 
+
       - name: Configurer l'identité git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
- 
+
       - name: Créer une branche de sauvegarde (1x/jour max)
         run: |
           TODAY=$(date -u +%Y-%m-%d)
@@ -169,14 +33,13 @@ jobs:
             git push origin "$BACKUP_BRANCH"
             git checkout main
           fi
- 
+
       - name: Ajouter l'upstream et fusionner
         run: |
           git remote add upstream https://github.com/Fredysessie/brvm-data-public.git
           git fetch upstream main
           git checkout main
           git merge upstream/main --no-ff -m "Sync data from upstream $(date -u +%Y-%m-%dT%H:%M:%SZ)"
- 
+
       - name: Pousser les changements
         run: git push origin main
- 
