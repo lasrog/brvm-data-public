@@ -70,4 +70,4 @@ const fetchCurrencyData = async (currencyCode) => {
 Des archives de toutes les données sont disponibles dans les [Releases](https://github.com/Fredysessie/brvm-data-public/releases).
 
 ---
-*Dernière mise à jour: 2026-08-20 13:16 UTC*
+*Dernière mise à jour: 2026-08-20 14:07 UTC*
