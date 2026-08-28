@@ -4,7 +4,7 @@ Ce repository contient les données boursières de la Bourse Régionale des Vale
 
 ## 📊 Structure des données
 
-- **Tickers disponibles** : 66
+- **Tickers disponibles** : 67
 - **Fichiers de données** : 398
 - **Devises suivies** : 52
 - **Dernière release** : Aucune
@@ -70,4 +70,4 @@ const fetchCurrencyData = async (currencyCode) => {
 Des archives de toutes les données sont disponibles dans les [Releases](https://github.com/Fredysessie/brvm-data-public/releases).
 
 ---
-*Dernière mise à jour: 2026-08-26 17:07 UTC*
+*Dernière mise à jour: 2026-08-28 12:56 UTC*
